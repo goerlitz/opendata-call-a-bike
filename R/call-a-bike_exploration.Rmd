@@ -1,0 +1,146 @@
+---
+title: "Call a Bike"
+output: html_notebook
+---
+
+```{r, include=FALSE}
+library(data.table)
+library(fasttime)
+library(ggplot2)
+library(forecast)
+```
+
+```{r}
+start <- Sys.time()
+DT <- fread('data/OPENDATA_BOOKING_CALL_A_BIKE.csv', sep = ';')
+end <- Sys.time()
+print(end - start)
+```
+
+```{r}
+head(DT)
+```
+
+```{r}
+# convert date columns
+date_cols = c('DATE_BOOKING', 'DATE_FROM', 'DATE_UNTIL')
+DT[,(date_cols):=lapply(.SD, fastPOSIXct),.SDcols=date_cols]
+
+# convert to factors
+chr_cols <- colnames(DT)[as.vector(lapply(DT, class) == "character")]
+DT[,(chr_cols):=lapply(.SD, as.factor),.SDcols=chr_cols]
+
+DT[,CATEGORY_HAL_ID := as.factor(CATEGORY_HAL_ID)]
+DT[,VEHICLE_HAL_ID := as.factor(VEHICLE_HAL_ID)]
+```
+
+```{r}
+str(DT)
+```
+
+## Distinct and NA Values
+
+```{r}
+dist_na <- sapply(DT, function(x) list(distinct=length(unique(x)), na=sum(is.na(x))))
+print(t(dist_na))
+```
+
+# Add features
+```{r}
+# add booking date
+DT[, BOOKING_DATE := as.Date(DATE_BOOKING)]
+
+DT[, rented_minutes:=floor(as.numeric(DT$DATE_UNTIL - DT$DATE_FROM) / 60)]
+```
+
+# Separate HH data
+
+```{r}
+DT_HH <- DT[CITY_RENTAL_ZONE == 'Hamburg']
+summary(DT_HH)
+```
+
+```{r}
+#fwrite(DT_HH, file='data/OPENDATA_BOOKING_CALL_A_BIKE_HH.csv')
+```
+
+# Data Exploration
+
+```{r}
+DT_top_cities = DT[,.(count=.N),by=CITY_RENTAL_ZONE][order(-count)]
+DT_top_cities[, percent := sprintf("%.1f %%", 100*count/sum(count))]
+print(DT_top_cities)
+```
+
+## Analyse Bookings by Date
+
+```{r}
+# group by city
+DT_bkng_dates = DT[, .(count=.N), by=.(BOOKING_DATE, CITY_RENTAL_ZONE)]
+
+# separate Hamburg
+#DT_bkng_dates[, HH :=CITY_RENTAL_ZONE == 'Hamburg']
+
+top_cities = DT_bkng_dates$CITY_RENTAL_ZONE %in% DT_top_cities$CITY_RENTAL_ZONE[1:5]
+
+ggplot(data=DT_bkng_dates[top_cities], aes(x=BOOKING_DATE, y=count, color=CITY_RENTAL_ZONE)) +
+  geom_line() +
+  facet_grid(CITY_RENTAL_ZONE~.) +
+  #facet_grid(CITY_RENTAL_ZONE~., scales = 'free_y') +
+  scale_color_brewer(palette='Set1') +
+  theme(legend.position="none")
+```
+
+# Trend Analyse
+
+```{r}
+plot_trend <- function(data) {
+  ts_week = ts(data, freq=7)
+  #ts_year = ts(DT_bkng_dates[CITY_RENTAL_ZONE == city]$count, freq=365)
+  ts_year = ts(decompose(ts_week)$trend, freq=365)
+  
+  autoplot(decompose(ts_year))
+}
+
+city='Hamburg'
+plot_trend(DT_bkng_dates[CITY_RENTAL_ZONE == city]$count)
+
+```
+
+# Analyse distances / renting time
+
+```{r}
+# find outliers
+table(DT$rented_minutes < 120) # less than 2 hours
+
+hist(DT[rented_minutes < 120,rented_minutes], xlab='minutes', main='Booking duration')
+
+DT_rental_time = DT[rented_minutes < 120,.(total_rental_time=sum(rented_minutes)),by=BOOKING_DATE]
+
+ggplot(data = DT_rental_time, aes(x=BOOKING_DATE, y=total_rental_time)) + geom_line()
+```
+
+# Analyse Hamburg Data
+
+```{r}
+DT_bike_use_HH = DT[CITY_RENTAL_ZONE=='Hamburg', .(count=.N, first_use=min(BOOKING_DATE), last_use=max(BOOKING_DATE)), by=.(VEHICLE_HAL_ID)]
+
+qplot(DT_bike_use_HH$count, geom="histogram", bins=50) + ylab('Number of bikes') + xlab('bookings per bike')
+```
+
+```{r}
+ggplot(data=DT_bike_use_HH, aes(x=first_use, y=last_use)) + geom_point(alpha=0.3)
+```
+
+```{r}
+DT_new_bikes_HH = DT_bike_use_HH[,.(count=.N),by=first_use]
+DT_new_bikes_HH[, cs:=cumsum(count)]
+DT_old_bikes_HH = DT_bike_use_HH[,.(count=.N),by=last_use][order(last_use)]
+DT_old_bikes_HH[, cs:=cumsum(count)]
+
+ggplot() +
+  geom_line(data=DT_new_bikes_HH, aes(x=first_use, y=cs)) +
+  geom_line(data=DT_old_bikes_HH, aes(x=last_use, y=cs)) +
+  ggtitle('New Bikes (and "removed" bikes)')
+```
+
