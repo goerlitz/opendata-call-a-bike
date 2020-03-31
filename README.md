@@ -1,5 +1,10 @@
 # Analysis of Bike Sharing Data
 
+<div align="center">
+  <img src="Call-a-Bike_Berlin.jpg"><br>
+  <span>Photo by <a href="https://commons.wikimedia.org/wiki/File:Call-a-Bike_Berlin.JPG">Rudolf Simon</a> on Wikimedia</span><br>
+</div>
+
 ## About
 
 *Deutsche Bahn* provides reporting data of its bike sharing service "Call a Bike" under an open license (Creative Commons Attribution 4.0 International CC BY 4.0.).
